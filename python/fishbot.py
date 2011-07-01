@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+'''
+Ported from the original ClueNet fishbot written by many people.
+'''
 from twisted.words.protocols import irc
 from twisted.internet import reactor, protocol
 from twisted.python import log
