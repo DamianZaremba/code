@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+'''
+****WARNING****
+This will open a port with _no_ authentication required.
+Probably using this on a shared box with un-trusted users is a bad idea.
+'''
 import urlparse
 import urllib
 import urllib2
@@ -7,13 +12,14 @@ import os
 import sys
 import random
 import select
+import ssl
 import socket
 
-API_KEY = ""
+API_KEY = "put your api key here..."
 PROXY_PORT = None
 
 def api_call(url=''):
-	url = 'http://admin.vps247.com%s' % url
+	url = 'https://admin.vps247.com%s' % url
 	headers = {
 		'x-vps247-api-key' : API_KEY,
 		'Accept': 'application/json',
@@ -58,7 +64,7 @@ def get_console(vmid):
 
 	vnc_client_port = connect_url_parsed.port
 	if not vnc_client_port:
-		vnc_client_port = 80
+		vnc_client_port = 443
 
 	try:
 		proxy_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -70,6 +76,7 @@ def get_console(vmid):
 
 	vnc_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	vnc_client.connect((connect_url_parsed.netloc, vnc_client_port))
+	vnc_client_ssl = ssl.wrap_socket(vnc_client)
 
 	connect_ref = ''
 	for k, v in connect_url_qsl:
@@ -86,19 +93,19 @@ def get_console(vmid):
 		)
 	)
 
-	vnc_client.send(connect_string)
+	vnc_client_ssl.write(connect_string)
 	buffer = ''
 	while "\r\n\r\n" not in buffer:
-		buffer += vnc_client.recv(512)
+		buffer += vnc_client_ssl.read(512)
 	buffer = '\r\n\r\n'.join(buffer.split('\r\n\r\n')[1:])
 
 	print "Proxy listening on port %s" % proxy_server_port
-	inputs = [proxy_server, vnc_client]
+	inputs = [proxy_server, vnc_client_ssl]
 	outputs = []
 	running = True
 
 	os.system('vncviewer localhost:%s &' % proxy_server_port)
-	
+
 	'''
 	This is kinda messy as we only proxy a 1<>1 connection...
 	Probably a better way of doing it but without using threads and buffers this just works.
@@ -118,8 +125,8 @@ def get_console(vmid):
 					outputs.append(client)
 					client.send(buffer)
 					buffer = ''
-			elif s == vnc_client:
-				data = s.recv(512)
+			elif s == vnc_client_ssl:
+				data = s.read(512)
 				if data:
 					if len(outputs) > 0:
 						for o in outputs:
@@ -144,23 +151,33 @@ def get_console(vmid):
 
 						if cs in inputs:
 							inputs.remove(cs)
+
 						if cs in outputs:
 							outputs.remove(cs)
 
 					proxy_server.close()
 			else:
-				data = s.recv(1024)
+				data = s.recv(512)
 				if data:
-					vnc_client.send(data)
+					vnc_client_ssl.write(data)
 				else:
-					s.close()
-					inputs.remove(s)
-					outputs.remove(s)
+					try:
+						s.close()
+					except:
+						pass
+
+					if s in inputs:
+						inputs.remove(s)
+
+					if s in outputs:
+						outputs.remove(s)
+
 					if len(outputs) == 0:
 						print "Last client left, exiting..."
 						running = False
 						vnc_client.close()
 						proxy_server.close()
+	return True
 
 try:
 	vmid = sys.argv[1]
@@ -174,4 +191,5 @@ except IndexError:
 		for vmid, vmname in vms:
 			print "%s\t\t%s" % (vmid, vmname)
 else:
-	get_console(vmid)
+	if not get_console(vmid):
+		print "Failed to get console"
